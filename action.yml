@@ -1,0 +1,79 @@
+name: CI/CD Workflow
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+
+env:
+  JAVA_VERSION: corretto11
+  PROJECT_NAME: whl
+  SERVICE_NAME: correspondent-service-mesh-demo
+  ALB_RULE_PRIORITY: 73
+  AWS_REGION: us-east-1
+  AWS_ACCOUNT_ID: 1234567890
+  REPOSITORY_NAME: abc-devops-banking-correspondent-service-mesh-demo
+  CPU: 1024
+  MEMORY: 2048
+  DESIRED_COUNT: 1
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: Set up JDK ${{ env.JAVA_VERSION }}
+        uses: actions/setup-java@v3
+        with:
+          java-version: ${{ env.JAVA_VERSION }}
+          distribution: 'temurin'
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v1
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Login to Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v1
+
+      - name: Build, tag, and push Docker image to Amazon ECR
+        run: |
+          IMAGE_URI="${{ env.AWS_ACCOUNT_ID }}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com/${{ env.REPOSITORY_NAME }}"
+          SERVICE_TAG=$(echo $GITHUB_SHA | cut -c1-7)-${{ github.run_number }}
+          docker build -t $SERVICE_NAME:$SERVICE_TAG .
+          docker tag $SERVICE_NAME:$SERVICE_TAG $IMAGE_URI:$SERVICE_TAG
+          docker push $IMAGE_URI:$SERVICE_TAG
+        env:
+          IMAGE_URI: ${{ steps.login-ecr.outputs.registry }}
+          SERVICE_TAG: ${{ env.SERVICE_TAG }}
+
+      - name: Update task definition
+        run: |
+          sed -i "s|%ServiceName%|${{ env.SERVICE_NAME }}|g" src/main/resources/application.yml
+          sed -i "s|%VersionNumber%|${SERVICE_TAG}|g" Dockerfile
+          # The actual JSON generation will depend on the specific needs, this is a placeholder.
+          echo "Generating task-definition.json"
+          # Insert the command or script to generate the task-definition.json here
+
+      - name: Deploy to ECS (or your deployment target)
+        run: |
+          # Use AWS CLI or other tools to deploy your service
+          echo "Deploying to ECS"
+          # Insert the deployment command here
+
+      - name: Upload Artifacts
+        uses: actions/upload-artifact@v3
+        with:
+          name: deployment-artifacts
+          path: |
+            image-definition.json
+            aws/task-definition.json
+            appspec.yml
